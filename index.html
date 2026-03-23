@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C Struct Alignment Visualizer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>C Struct Memory Alignment Visualizer</h1>
+            <p>Paste a C struct below and select the architecture.</p>
+        </header>
+
+        <main>
+            <div class="row">
+                <div class="panel input-panel">
+                    <label for="struct-input"><strong>Original Struct:</strong></label>
+                    <textarea id="struct-input" spellcheck="false">struct Example {
+    char a;
+    long b;
+    char c;
+    void *d;
+};</textarea>
+                    
+                    <div class="control-group">
+                        <label for="arch-select"><strong>Architecture Data Model:</strong></label>
+                        <select id="arch-select">
+                            <option value="lp64">64-bit Unix/macOS/Linux (LP64)</option>
+                            <option value="llp64">64-bit Windows (LLP64)</option>
+                            <option value="ilp32">32-bit Systems (ILP32)</option>
+                        </select>
+                    </div>
+
+                    <button id="check-btn">CHECK ALIGNMENT</button>
+                    <div id="error-msg" class="error hidden"></div>
+                </div>
+
+                <div class="panel output-panel">
+                    <div class="legend">
+                        <span class="legend-item"><div class="box byte-member" style="background: #4363d8;"></div> Member</span>
+                        <span class="legend-item"><div class="box byte-padding"></div> Padding</span>
+                    </div>
+                    <div id="summary">
+                        <h2>Original Size: <span id="total-size">0</span> bytes</h2>
+                    </div>
+                    <div class="grid-container">
+                        <div id="memory-grid" class="memory-grid"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="panel input-panel">
+                    <label for="optimized-input"><strong>Optimized Struct (Reordered):</strong></label>
+                    <textarea id="optimized-input" readonly class="readonly-text"></textarea>
+                </div>
+
+                <div class="panel output-panel">
+                    <div class="legend">
+                        <span class="legend-item"><div class="box byte-member" style="background: #3cb44b;"></div> Member</span>
+                        <span class="legend-item"><div class="box byte-padding"></div> Padding</span>
+                    </div>
+                    <div id="summary">
+                        <h2>Optimized Size: <span id="optimized-total-size">0</span> bytes</h2>
+                    </div>
+                    <div class="grid-container">
+                        <div id="optimized-memory-grid" class="memory-grid"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
