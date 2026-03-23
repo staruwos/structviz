@@ -4,7 +4,6 @@ const tooltip = document.createElement('div');
 tooltip.className = 'global-tooltip';
 document.body.appendChild(tooltip);
 
-document.getElementById('check-btn').addEventListener('click', processStruct);
 
 
 // Distinct colors for different struct members
@@ -37,12 +36,12 @@ function processStruct() {
         renderGrid(layout, 'memory-grid', 'total-size');
 
         // 2. Process Optimized Struct
-        const optimizedFields = optimizeFields(fields);
+        /*const optimizedFields = optimizeFields(fields);
         const optimizedCode = generateStructCode(optimizedFields);
         document.getElementById('optimized-input').value = optimizedCode;
         
         const optimizedLayout = calculateAlignment(optimizedFields);
-        renderGrid(optimizedLayout, 'optimized-memory-grid', 'optimized-total-size');
+        renderGrid(optimizedLayout, 'optimized-memory-grid', 'optimized-total-size');*/
 
     } catch (err) {
         errorMsg.textContent = err.message;
