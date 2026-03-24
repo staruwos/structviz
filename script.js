@@ -29,13 +29,13 @@ function processStruct() {
     try {
         errorMsg.classList.add('hidden');
         
-        // 1. Process Original Struct
+        // Process Original Struct
         const fields = parseStruct(input, arch);
         if (fields.length === 0) throw new Error("No valid fields found in struct.");
         const layout = calculateAlignment(fields);
         renderGrid(layout, 'memory-grid', 'total-size');
 
-        // 2. Process Optimized Struct
+        // Process Optimized Struct
         /*const optimizedFields = optimizeFields(fields);
         const optimizedCode = generateStructCode(optimizedFields);
         document.getElementById('optimized-input').value = optimizedCode;
@@ -48,6 +48,7 @@ function processStruct() {
         errorMsg.classList.remove('hidden');
     }
 }
+
 function parseStruct(text, arch) {
     let cleanText = text.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
     let insideStruct = cleanText.match(/\{([\s\S]*?)\}/);
@@ -57,21 +58,34 @@ function parseStruct(text, arch) {
     let fields = [];
 
     statements.forEach(stmt => {
-        let match = stmt.match(/^(.+?)\s+(\**\s*[a-zA-Z0-9_]+)\s*(?:\[(\d+)\])?$/);
-        if (!match) throw new Error(`Syntax error on line: "${stmt};"`);
+        let name, rawType, isPointer, arraySize = 1, isFuncPtr = false;
 
-        let rawType = match[1].trim();
-        let namePart = match[2].replace(/\s+/g, '');
-        let arraySize = match[3] ? parseInt(match[3]) : 1;
+        // Check for function pointers (int (*my_func)(int, float) or int (*funcs[5])(int))
+        let funcPtrMatch = stmt.match(/^(.+?)\s*\(\s*\*\s*([a-zA-Z0-9_]+)\s*(?:\[(\d+)\])?\s*\)\s*\((.*?)\)$/);
 
-        let isPointer = namePart.includes('*') || rawType.includes('*');
-        let name = namePart.replace(/\*/g, '');
-        
+        if (funcPtrMatch) {
+            rawType = funcPtrMatch[1].trim() + "(*)()"; // Simplify type for tooltip
+            name = funcPtrMatch[2];
+            isPointer = true;
+            isFuncPtr = true;
+            arraySize = funcPtrMatch[3] ? parseInt(funcPtrMatch[3]) : 1;
+        } else {
+            let match = stmt.match(/^(.+?)\s+(\**\s*[a-zA-Z0-9_]+)\s*(?:\[(\d+)\])?$/);
+            if (!match) throw new Error(`Syntax error on line: "${stmt};"`);
+
+            rawType = match[1].trim();
+            let namePart = match[2].replace(/\s+/g, '');
+            arraySize = match[3] ? parseInt(match[3]) : 1;
+
+            isPointer = namePart.includes('*') || rawType.includes('*');
+            name = namePart.replace(/\*/g, '');
+        }
+
         let { size, align } = getTypeInfo(rawType, isPointer, arch);
-        
+
         fields.push({
             name,
-            type: isPointer ? rawType + '*' : rawType,
+            type: isFuncPtr ? rawType : (isPointer ? rawType + '*' : rawType),
             size,
             align,
             count: arraySize
@@ -84,23 +98,52 @@ function parseStruct(text, arch) {
 function getTypeInfo(typeStr, isPointer, arch) {
     const model = archModels[arch];
     
-    // Pointers scale based on architecture
+    // All pointers (including function pointers) scale to architecture
     if (isPointer) return { size: model.pointer, align: model.pointer };
     
     let t = typeStr.toLowerCase();
+
+    // Stddef types (Pointer-sized)
+    if (t.includes('size_t') || t.includes('intptr_t') || t.includes('ptrdiff_t')) {
+        return { size: model.pointer, align: model.pointer };
+    }
+
+    // Max types (Typically 8 bytes on all modern standard systems)
+    if (t.includes('max_t')) return { size: 8, align: 8 };
+
+    // Exact-width and Least-width types (int32_t, uint_least16_t)
+    let exactOrLeastMatch = t.match(/int(?:_least)?(\d+)_t/);
+    if (exactOrLeastMatch) {
+        let bytes = parseInt(exactOrLeastMatch[1]) / 8;
+        return { size: bytes, align: bytes };
+    }
+
+    // Fast-width types (int_fast16_t)
+    let fastMatch = t.match(/int_fast(\d+)_t/);
+    if (fastMatch) {
+        let bits = parseInt(fastMatch[1]);
+        if (bits === 8) return { size: 1, align: 1 };
+        if (bits === 64) return { size: 8, align: 8 };
+        
+        // On 64-bit Linux (LP64), fast16/32 are often implemented as 8 bytes!
+        // On 64-bit Windows (LLP64) and 32-bit (ILP32), they remain 4 bytes.
+        let fastSize = (arch === 'lp64') ? 8 : 4;
+        return { size: fastSize, align: fastSize };
+    }
     
-    // Fixed size types
+    // Traditional fixed sizes
     if (t.includes('char') || t.includes('int8')) return { size: 1, align: 1 };
     if (t.includes('short') || t.includes('int16')) return { size: 2, align: 2 };
     if (t.includes('long long') || t.includes('double') || t.includes('int64')) return { size: 8, align: 8 };
     
-    // Architecture-dependent types
+    // Architecture-dependent traditional types
     if (t.includes('long')) return { size: model.long, align: model.long }; 
     if (t.includes('int') || t.includes('float') || t.includes('int32')) return { size: model.int, align: model.int };
     
     // Default fallback
     return { size: model.int, align: model.int }; 
 }
+
 function calculateAlignment(fields) {
     let offset = 0;
     let maxAlign = 1;
