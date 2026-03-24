@@ -50,49 +50,97 @@ function processStruct() {
 }
 
 function parseStruct(text, arch) {
+    // Extraction
     let cleanText = text.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
-    let insideStruct = cleanText.match(/\{([\s\S]*?)\}/);
-    if (!insideStruct) throw new Error("Could not find struct body {}");
+    let bodyMatch = cleanText.match(/\{([\s\S]*)\}/);
+    if (!bodyMatch) throw new Error("Could not find struct body { ... }");
+    let body = bodyMatch[1].trim();
+
+    // Split by semicolons, but ignore semicolons inside nested braces
+    let statements = [];
+    let bracketLevel = 0;
+    let currentStatement = "";
     
-    let statements = insideStruct[1].split(';').map(s => s.trim()).filter(s => s);
+    for (let char of body) {
+        if (char === '{') bracketLevel++;
+        if (char === '}') bracketLevel--;
+        if (char === ';' && bracketLevel === 0) {
+            statements.push(currentStatement.trim());
+            currentStatement = "";
+        } else {
+            currentStatement += char;
+        }
+    }
+
     let fields = [];
 
     statements.forEach(stmt => {
-        let name, rawType, isPointer, arraySize = 1, isFuncPtr = false;
+        if (!stmt) return;
 
-        // Check for function pointers (int (*my_func)(int, float) or int (*funcs[5])(int))
-        let funcPtrMatch = stmt.match(/^(.+?)\s*\(\s*\*\s*([a-zA-Z0-9_]+)\s*(?:\[(\d+)\])?\s*\)\s*\((.*?)\)$/);
+        // Check for nested struct: "struct Name { ... } var1, var2;"
+        let nestedMatch = stmt.match(/^(struct\s+[a-zA-Z0-9_]*\s*\{[\s\S]*\})\s*(.*)$/);
+        
+        if (nestedMatch) {
+            let innerStructCode = nestedMatch[1];
+            let instances = nestedMatch[2].split(',').map(s => s.trim()).filter(s => s);
+            
+            // Recurse to get size/align of the inner struct
+            let innerFields = parseStruct(innerStructCode, arch);
+            let innerLayout = calculateAlignment(innerFields);
+            
+            instances.forEach(inst => {
+                // Handle arrays for nested structs: "struct Inner a[2];"
+                let arrayMatch = inst.match(/^(\**\s*[a-zA-Z0-9_]+)\s*(?:\[(\d+)\])?$/);
+                let name = arrayMatch[1].replace(/\*/g, '').trim();
+                let isPointer = arrayMatch[1].includes('*');
+                let count = arrayMatch[2] ? parseInt(arrayMatch[2]) : 1;
 
-        if (funcPtrMatch) {
-            rawType = funcPtrMatch[1].trim() + "(*)()"; // Simplify type for tooltip
-            name = funcPtrMatch[2];
-            isPointer = true;
-            isFuncPtr = true;
-            arraySize = funcPtrMatch[3] ? parseInt(funcPtrMatch[3]) : 1;
+                fields.push({
+                    name: name,
+                    type: "struct (nested)",
+                    size: isPointer ? archModels[arch].pointer : innerLayout.totalSize,
+                    align: isPointer ? archModels[arch].pointer : getMaxAlign(innerFields),
+                    count: count
+                });
+            });
         } else {
-            let match = stmt.match(/^(.+?)\s+(\**\s*[a-zA-Z0-9_]+)\s*(?:\[(\d+)\])?$/);
-            if (!match) throw new Error(`Syntax error on line: "${stmt};"`);
+            // Standard types, including multiple declarations: "int a, *b[2];"
+            // Use a regex that stops at the first space/identifier boundary
+            let parts = stmt.match(/^(.+?)\s+([^;]+)$/);
+            if (!parts) return;
 
-            rawType = match[1].trim();
-            let namePart = match[2].replace(/\s+/g, '');
-            arraySize = match[3] ? parseInt(match[3]) : 1;
+            let typePart = parts[1].trim();
+            let vars = parts[2].split(',').map(v => v.trim());
 
-            isPointer = namePart.includes('*') || rawType.includes('*');
-            name = namePart.replace(/\*/g, '');
+            vars.forEach(v => {
+                let funcPtrMatch = v.match(/^\(\s*\*\s*([a-zA-Z0-9_]+)\s*(?:\[(\d+)\])?\s*\)\s*\((.*?)\)$/);
+                let name, isPointer, count = 1, displayType = typePart;
+
+                if (funcPtrMatch) {
+                    name = funcPtrMatch[1];
+                    isPointer = true;
+                    count = funcPtrMatch[2] ? parseInt(funcPtrMatch[2]) : 1;
+                    displayType += "(*)()";
+                } else {
+                    let varMatch = v.match(/^(\**\s*[a-zA-Z0-9_]+)\s*(?:\[(\d+)\])?$/);
+                    if (!varMatch) return;
+                    name = varMatch[1].replace(/\*/g, '').trim();
+                    isPointer = varMatch[1].includes('*');
+                    count = varMatch[2] ? parseInt(varMatch[2]) : 1;
+                }
+
+                let { size, align } = getTypeInfo(typePart, isPointer, arch);
+                fields.push({ name, type: displayType, size, align, count });
+            });
         }
-
-        let { size, align } = getTypeInfo(rawType, isPointer, arch);
-
-        fields.push({
-            name,
-            type: isFuncPtr ? rawType : (isPointer ? rawType + '*' : rawType),
-            size,
-            align,
-            count: arraySize
-        });
     });
 
     return fields;
+}
+
+// Helper to find the largest alignment requirement in a struct
+function getMaxAlign(fields) {
+    return fields.reduce((max, f) => Math.max(max, f.align), 1);
 }
 
 function getTypeInfo(typeStr, isPointer, arch) {
