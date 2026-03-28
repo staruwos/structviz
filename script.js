@@ -18,7 +18,8 @@ const colors = [
 const archModels = {
     'lp64':  { pointer: 8, long: 8, int: 4 }, 
     'llp64': { pointer: 8, long: 4, int: 4 }, 
-    'ilp32': { pointer: 4, long: 4, int: 4 }  
+    'ilp32': { pointer: 4, long: 4, int: 4 },
+    'cc65':  { pointer: 2, long: 4, int: 2 }  
 };
 
 function processStruct() {
@@ -146,50 +147,67 @@ function getMaxAlign(fields) {
 function getTypeInfo(typeStr, isPointer, arch) {
     const model = archModels[arch];
     
-    // All pointers (including function pointers) scale to architecture
-    if (isPointer) return { size: model.pointer, align: model.pointer };
-    
-    let t = typeStr.toLowerCase();
-
-    // Stddef types (Pointer-sized)
-    if (t.includes('size_t') || t.includes('intptr_t') || t.includes('ptrdiff_t')) {
-        return { size: model.pointer, align: model.pointer };
-    }
-
-    // Max types (Typically 8 bytes on all modern standard systems)
-    if (t.includes('max_t')) return { size: 8, align: 8 };
-
-    // Exact-width and Least-width types (int32_t, uint_least16_t)
-    let exactOrLeastMatch = t.match(/int(?:_least)?(\d+)_t/);
-    if (exactOrLeastMatch) {
-        let bytes = parseInt(exactOrLeastMatch[1]) / 8;
-        return { size: bytes, align: bytes };
-    }
-
-    // Fast-width types (int_fast16_t)
-    let fastMatch = t.match(/int_fast(\d+)_t/);
-    if (fastMatch) {
-        let bits = parseInt(fastMatch[1]);
-        if (bits === 8) return { size: 1, align: 1 };
-        if (bits === 64) return { size: 8, align: 8 };
+    // We wrap the original logic in an internal helper so we can 
+    // easily override the alignment for 8-bit targets at the end.
+    let getRawTypeInfo = () => {
+        // All pointers (including function pointers) scale to architecture
+        if (isPointer) return { size: model.pointer, align: model.pointer };
         
-        // On 64-bit Linux (LP64), fast16/32 are often implemented as 8 bytes!
-        // On 64-bit Windows (LLP64) and 32-bit (ILP32), they remain 4 bytes.
-        let fastSize = (arch === 'lp64') ? 8 : 4;
-        return { size: fastSize, align: fastSize };
+        let t = typeStr.toLowerCase();
+
+        // Stddef types (Pointer-sized)
+        if (t.includes('size_t') || t.includes('intptr_t') || t.includes('ptrdiff_t')) {
+            return { size: model.pointer, align: model.pointer };
+        }
+
+        // Max types (Typically 8 bytes on all modern standard systems)
+        if (t.includes('max_t')) return { size: 8, align: 8 };
+
+        // Exact-width and Least-width types (int32_t, uint_least16_t)
+        let exactOrLeastMatch = t.match(/int(?:_least)?(\d+)_t/);
+        if (exactOrLeastMatch) {
+            let bytes = parseInt(exactOrLeastMatch[1]) / 8;
+            return { size: bytes, align: bytes };
+        }
+
+        // Fast-width types (int_fast16_t)
+        let fastMatch = t.match(/int_fast(\d+)_t/);
+        if (fastMatch) {
+            let bits = parseInt(fastMatch[1]);
+            if (bits === 8) return { size: 1, align: 1 };
+            if (bits === 64) return { size: 8, align: 8 };
+            
+            // Handle architecture-dependent fast types
+            let fastSize = 4;
+            if (arch === 'lp64') fastSize = 8;
+            if (arch === 'cc65') fastSize = (bits >= 32) ? 4 : 2;
+            
+            return { size: fastSize, align: fastSize };
+        }
+        
+        // Traditional fixed sizes
+        if (t.includes('char') || t.includes('int8')) return { size: 1, align: 1 };
+        if (t.includes('short') || t.includes('int16')) return { size: 2, align: 2 };
+        if (t.includes('long long') || t.includes('double') || t.includes('int64')) return { size: 8, align: 8 };
+        
+        // Architecture-dependent traditional types
+        if (t.includes('long')) return { size: model.long, align: model.long }; 
+        if (t.includes('int') || t.includes('float') || t.includes('int32')) return { size: model.int, align: model.int };
+        
+        // Default fallback
+        return { size: model.int, align: model.int }; 
+    };
+
+    let result = getRawTypeInfo();
+
+    // The Magic 8-bit Rule:
+    // 6502 fetches memory exactly one byte at a time. It doesn't care about alignment boundaries.
+    // Therefore, the compiler tightly packs everything with an alignment requirement of 1.
+    if (arch === 'cc65') {
+        result.align = 1;
     }
-    
-    // Traditional fixed sizes
-    if (t.includes('char') || t.includes('int8')) return { size: 1, align: 1 };
-    if (t.includes('short') || t.includes('int16')) return { size: 2, align: 2 };
-    if (t.includes('long long') || t.includes('double') || t.includes('int64')) return { size: 8, align: 8 };
-    
-    // Architecture-dependent traditional types
-    if (t.includes('long')) return { size: model.long, align: model.long }; 
-    if (t.includes('int') || t.includes('float') || t.includes('int32')) return { size: model.int, align: model.int };
-    
-    // Default fallback
-    return { size: model.int, align: model.int }; 
+
+    return result;
 }
 
 function calculateAlignment(fields) {
