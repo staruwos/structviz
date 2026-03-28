@@ -217,3 +217,26 @@ select {
     opacity: 1;
     visibility: visible;
 }
+
+.github-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 10px;
+    padding: 6px 12px;
+    background-color: transparent;
+    color: #555; 
+    text-decoration: none;
+    border: 1px solid #ccc; 
+    border-radius: 6px;
+    font-size: 13px; 
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.github-btn:hover {
+    background-color: #f0f0f0;
+    color: #111;
+    border-color: #999;
+}
